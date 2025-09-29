@@ -1,9 +1,9 @@
 services:
   # Using a more descriptive service name
-  notebook:
+  fe:
     # Build from the Dockerfile in the current directory '.'
     build: .
-    container_name: notebook_container
+    container_name: fe_container
 
     # Map ports for both Jupyter and MONAI Label
     ports:
