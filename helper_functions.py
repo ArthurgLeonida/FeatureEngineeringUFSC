@@ -41,6 +41,7 @@ def rbf_kernel(x, y=None, sigma=None):
     """
     Radial Basis Function (Gaussian) kernel
     k(x,y) = exp(-||x-y||²/(2σ²))
+    Memory-efficient version for large datasets.
     """
     x = np.asarray(x, dtype=float).reshape(-1, 1)
     if y is None:
@@ -49,9 +50,16 @@ def rbf_kernel(x, y=None, sigma=None):
         y = np.asarray(y, dtype=float).reshape(-1, 1)
 
     if sigma is None or sigma <= 0:
-        data = x if y is x else np.vstack([x, y])
-        if data.shape[0] > 1:
-            distances = pdist(data, metric='euclidean')
+        # Use subsample for sigma estimation to avoid memory issues
+        max_samples = 5000
+        if x.shape[0] > max_samples:
+            indices = np.random.choice(x.shape[0], max_samples, replace=False)
+            sample_data = x[indices]
+        else:
+            sample_data = x
+            
+        if sample_data.shape[0] > 1:
+            distances = pdist(sample_data, metric='euclidean')
             distances = distances[distances > 0]
             if distances.size:
                 sigma = np.median(distances)
@@ -80,10 +88,12 @@ def center_kernel_matrix(K):
     K_centered = H @ K @ H
     return K_centered
 
-def hsic_from_scratch(x, y, sigma_x=None, sigma_y=None):
+def hsic_from_scratch(x, y, sigma_x=None, sigma_y=None, max_samples=5000):
     """
     Implement HSIC (Hilbert-Schmidt Independence Criterion)
-    Measures dependence using kernel similarities
+    Measures dependence using kernel similarities.
+    
+    For large datasets (>max_samples), uses random subsampling to avoid memory issues.
     """
     x = np.asarray(x, dtype=float).ravel()
     y = np.asarray(y, dtype=float).ravel()
@@ -94,6 +104,13 @@ def hsic_from_scratch(x, y, sigma_x=None, sigma_y=None):
 
     if n < 2:
         return 0.0
+    
+    # Subsample for large datasets to avoid memory errors
+    if n > max_samples:
+        indices = np.random.choice(n, max_samples, replace=False)
+        x = x[indices]
+        y = y[indices]
+        n = max_samples
         
     # Create kernel matrices
     K_x = rbf_kernel(x, sigma_x)
