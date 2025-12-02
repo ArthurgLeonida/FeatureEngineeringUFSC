@@ -1,5 +1,3 @@
-from sklearn.metrics.pairwise import rbf_kernel
-from sklearn.metrics import mutual_info_score
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist
@@ -66,26 +64,27 @@ def rbf_kernel(x, y=None, sigma=None):
         if sigma is None or sigma <= 0 or np.isnan(sigma):
             sigma = 1.0
 
-    diff = x - y.T
-    dist_sq = diff ** 2
+    # Correct broadcasting: x[:, None, :] - y[None, :, :]
+    diff = x[:, np.newaxis, :] - y[np.newaxis, :, :]
+    dist_sq = np.sum(diff ** 2, axis=2)
     return np.exp(-dist_sq / (2 * sigma ** 2))
 
 def center_kernel_matrix(K):
     """
     Center the kernel matrix (remove mean similarities)
-    H @ K @ H where H = I - (1/n) * ones_matrix
+    More efficient implementation without explicit H matrix creation
     """
     K = np.asarray(K, dtype=float)
     n = K.shape[0]
-    # If K is empty, return it as is
     if n == 0:
         return K
-    # Create centering matrix H = I - (1/n) * ones_matrix
-    ones = np.ones((n, n)) / n
-    H = np.eye(n) - ones
     
-    # Center the kernel: H @ K @ H
-    K_centered = H @ K @ H
+    # More efficient centering: K - row_means - col_means + total_mean
+    row_means = np.mean(K, axis=1, keepdims=True)
+    col_means = np.mean(K, axis=0, keepdims=True)
+    total_mean = np.mean(K)
+    
+    K_centered = K - row_means - col_means + total_mean
     return K_centered
 
 def hsic_from_scratch(x, y, sigma_x=None, sigma_y=None, max_samples=5000):
@@ -130,6 +129,11 @@ def scott_rule(x):
     n = len(x)
     sigma = np.std(x)
     bin_width = 3.5 * sigma / (n ** (1/3))
+    
+    # Handle zero bin_width (constant data or very low variance)
+    if bin_width == 0 or np.max(x) == np.min(x):
+        return max(2, min(int(np.sqrt(n)), n//5))  # Fall back to sqrt rule
+    
     bins = int((np.max(x) - np.min(x)) / bin_width)
     return max(2, min(bins, n//5))  # Reasonable bounds
 
@@ -164,6 +168,11 @@ def freedman_diaconis_rule(x):
     n = len(x)
     iqr = np.percentile(x, 75) - np.percentile(x, 25)
     bin_width = 2 * iqr / (n ** (1/3))
+    
+    # Handle zero bin_width (no variability in data)
+    if bin_width == 0 or np.max(x) == np.min(x):
+        return max(2, min(int(np.sqrt(n)), n//5))  # Fall back to sqrt rule
+    
     bins = int((np.max(x) - np.min(x)) / bin_width)
     return max(2, min(bins, n//5))
 
@@ -198,7 +207,11 @@ class OptimalMIEstimator:
         edges = np.unique(edges)
         if edges.size <= 2:
             return np.zeros_like(x, dtype=int)
-        return np.digitize(x, edges[1:-1], right=False)
+        # Use interior edges for digitization, handling edge case
+        interior_edges = edges[1:-1] if edges.size > 2 else []
+        if len(interior_edges) == 0:
+            return np.zeros_like(x, dtype=int)
+        return np.digitize(x, interior_edges, right=False)
 
     def estimate(self, x, y):
         '''
@@ -221,16 +234,27 @@ class OptimalMIEstimator:
                 bins = self._bins_from_method(x, method)
                 bins = max(1, bins)
                 x_disc = self._digitize(x, bins)
-                mi = mutual_info_score(y, x_disc)
+                
+                # Use actual number of unique values as bins for MI calculation
+                actual_bins = len(np.unique(x_disc))
+                mi = mutual_information_from_scratch(y, x_disc, bins=actual_bins)
+                
                 if mi > best_mi:
                     best_mi, best_bins, best_method = mi, bins, method
             except Exception:
                 continue
 
         if best_method is None:
-            best_bins = max(1, int(np.ceil(np.sqrt(len(x)))))
+            # More robust fallback
+            best_bins = max(2, min(int(np.ceil(np.sqrt(len(x)))), len(np.unique(x))))
             x_disc = self._digitize(x, best_bins)
-            best_mi = mutual_info_score(y, x_disc)
+            
+            # Final validation for fallback
+            if len(np.unique(x_disc)) <= 1:
+                best_mi = 0.0  # No information if all values are the same
+            else:
+                actual_bins = len(np.unique(x_disc))
+                best_mi = mutual_information_from_scratch(y, x_disc, bins=actual_bins)
             best_method = 'sqrt'
 
         return float(best_mi), int(best_bins), best_method
