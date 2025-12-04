@@ -120,7 +120,8 @@ def hsic_from_scratch(x, y, sigma_x=None, sigma_y=None, max_samples=5000):
     K_y_centered = center_kernel_matrix(K_y)
     
     # HSIC = trace(K_x_centered @ K_y_centered) / (n-1)^2
-    hsic_value = np.trace(K_x_centered @ K_y_centered) / ((n-1)**2)
+    # hsic_value = np.trace(K_x_centered @ K_y_centered) / ((n-1)**2)
+    hsic_value = np.sum(K_x_centered * K_y_centered) / (n - 1) ** 2
     
     return hsic_value
 
