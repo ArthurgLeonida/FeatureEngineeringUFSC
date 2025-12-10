@@ -6,25 +6,67 @@ import pandas as pd
 ############################ DEPENDENCE MEASURES ############################
 
 def mutual_information(x, y, bins=10):
-    """Calculates mutual information using the standard sklearn method."""
-    # Discretize continuous variable x before calculating MI
-    if pd.api.types.is_numeric_dtype(x) and x.nunique() > bins:
-        x_binned = pd.cut(x, bins=bins, labels=False, duplicates='drop')
+    """Calculates mutual information from scratch using NumPy."""
+    x = np.array(x)
+    y = np.array(y)
+    n = len(x)
+    
+    # Discretize x if it is continuous/numeric
+    if np.issubdtype(x.dtype, np.number) and len(np.unique(x)) > bins:
+        hist, bin_edges = np.histogram(x, bins=bins)
+        x_discrete = np.digitize(x, bin_edges[:-1]) - 1
     else:
-        x_binned = x
+        # If already categorical, map to integer indices
+        _, x_discrete = np.unique(x, return_inverse=True)
         
-    # Use the direct function from scikit-learn
-    return mutual_info_score(y, x_binned)
+    # Handle y (target) - map to integer indices
+    _, y_discrete = np.unique(y, return_inverse=True)
+    
+    # Calculate Joint Probability Distribution P(X, Y)
+    n_x = len(np.unique(x_discrete))
+    n_y = len(np.unique(y_discrete))
+    
+    # bins argument in histogram2d takes the number of edges, so we pass max index + 1
+    joint_hist, _, _ = np.histogram2d(x_discrete, y_discrete, bins=[n_x, n_y])
+    p_xy = joint_hist / n
+    
+    # Calculate Marginal Distributions P(X) and P(Y)
+    p_x = np.sum(p_xy, axis=1)
+    p_y = np.sum(p_xy, axis=0)
+    
+    # Calculate MI: sum( p(x,y) * log( p(x,y) / (p(x)*p(y)) ) )
+    mi = 0.0
+    for i in range(p_xy.shape[0]):
+        for j in range(p_xy.shape[1]):
+            if p_xy[i, j] > 0: # Avoid log(0)
+                mi += p_xy[i, j] * np.log(p_xy[i, j] / (p_x[i] * p_y[j]))
+                
+    return mi
 
 def hsic(X, Y, sigma_X=1.0, sigma_Y=1.0):
-    """Calculates the Hilbert-Schmidt Independence Criterion."""
+    """Calculates HSIC using manual kernel implementation."""
     n = len(X)
     if n < 2: return 0.0
-    X, Y = np.asarray(X).reshape(-1, 1), np.asarray(Y).reshape(-1, 1)
-    K, L = rbf_kernel(X, gamma=1/(2*sigma_X**2)), rbf_kernel(Y, gamma=1/(2*sigma_Y**2))
+    
+    # Use manual kernel instead of sklearn
+    K = manual_rbf_kernel(X, sigma=sigma_X)
+    L = manual_rbf_kernel(Y, sigma=sigma_Y)
+    
     H = np.eye(n) - (1/n) * np.ones((n,n))
-    Kc, Lc = H @ K @ H, H @ L @ H
+    Kc = H @ K @ H
+    Lc = H @ L @ H
+    
     return np.trace(Kc @ Lc) / ((n - 1)**2)
+
+def manual_rbf_kernel(X, sigma=1.0):
+    """Manual implementation of RBF Kernel."""
+    X = np.asarray(X).reshape(-1, 1)
+    # Compute squared Euclidean distances
+    # (x - y)^2 = x^2 + y^2 - 2xy
+    X_sq = np.sum(X**2, axis=1).reshape(-1, 1)
+    dists_sq = X_sq + X_sq.T - 2 * np.dot(X, X.T)
+    gamma = 1.0 / (2 * sigma**2)
+    return np.exp(-gamma * dists_sq)
 
 ############################ BINNING STRATEGIES ############################
 
